@@ -1,0 +1,988 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>GBA Simulator: Chiikawa Battle Remastered</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=DotGothic16&display=swap');
+
+        :root {
+            --gba-purple: #584e88;
+            --gba-dark: #3e3666;
+            --gba-light: #7065a3;
+            --screen-bg: #f8f9fa;
+            --screen-ui: #303841;
+        }
+
+        body {
+            background-color: #1a1a1a;
+            font-family: 'DotGothic16', sans-serif;
+            overflow: hidden;
+            touch-action: none;
+            user-select: none;
+        }
+
+        /* --- GBA 硬件样式 --- */
+        .gba-body {
+            background: linear-gradient(160deg, var(--gba-light) 0%, var(--gba-purple) 50%, var(--gba-dark) 100%);
+            box-shadow: 
+                inset 2px 2px 5px rgba(255,255,255,0.2),
+                inset -2px -2px 5px rgba(0,0,0,0.3),
+                0 20px 40px rgba(0,0,0,0.6);
+            border-radius: 24px 24px 48px 48px;
+            position: relative;
+            border: 2px solid rgba(0,0,0,0.2);
+        }
+
+        .screen-lens {
+            background-color: #252525;
+            border-radius: 15px 15px 35px 35px;
+            box-shadow: inset 0 5px 10px rgba(0,0,0,0.5);
+            position: relative;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px 30px 10px 30px;
+        }
+
+        .logo {
+            color: #b0b0b0;
+            font-family: sans-serif;
+            font-style: italic;
+            font-weight: 800;
+            letter-spacing: 1px;
+            text-shadow: 1px 1px 0 #000;
+            opacity: 0.9;
+            margin-bottom: 4px;
+        }
+
+        .power-light {
+            background-color: #444;
+            border-radius: 50%;
+            box-shadow: inset 1px 1px 2px black;
+            transition: background-color 0.2s, box-shadow 0.2s;
+        }
+        .power-light.on {
+            background-color: #00ff00;
+            box-shadow: 0 0 5px #00ff00, inset 1px 1px 2px rgba(255,255,255,0.5);
+        }
+
+        .lcd-screen {
+            background-color: var(--screen-bg);
+            width: 100%;
+            aspect-ratio: 4 / 3;
+            image-rendering: pixelated;
+            box-shadow: inset 2px 2px 5px rgba(0,0,0,0.2);
+            position: relative;
+            overflow: hidden;
+            border: 4px solid #111;
+            border-radius: 4px;
+        }
+        
+        .lcd-screen::after {
+            content: " ";
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%);
+            background-size: 100% 4px;
+            pointer-events: none;
+            z-index: 50;
+            opacity: 0.6;
+        }
+
+        /* --- 按键样式 --- */
+        .d-pad { filter: drop-shadow(0 4px 2px rgba(0,0,0,0.4)); }
+        .d-pad div { background: #333; transition: transform 0.1s; }
+        .d-pad div:active, .d-pad div.active { background: #222; }
+        
+        .action-btn {
+            background: #e0e0e0;
+            box-shadow: 0 4px 0 #999, inset 0 2px 5px rgba(255,255,255,0.8);
+            transition: transform 0.1s, box-shadow 0.1s;
+        }
+        .action-btn:active, .action-btn.active {
+            transform: translateY(4px);
+            box-shadow: 0 0 0 #999, inset 0 2px 5px rgba(0,0,0,0.2);
+        }
+
+        .select-start {
+            background: #888;
+            box-shadow: 0 2px 0 #555;
+            transform: rotate(-15deg);
+        }
+        .select-start:active {
+            transform: rotate(-15deg) translateY(2px);
+            box-shadow: none;
+        }
+
+        /* --- 游戏 UI --- */
+        .dialog-box {
+            background: white;
+            border: 4px solid #303841;
+            border-radius: 4px;
+            box-shadow: 2px 2px 0 rgba(0,0,0,0.3);
+        }
+        
+        .hp-bar-bg {
+            background: #555;
+            border: 2px solid #333;
+            border-radius: 4px;
+            height: 8px;
+            overflow: hidden;
+        }
+        .hp-bar-fill {
+            background: #4cd137;
+            height: 100%;
+            transition: width 0.5s ease-out, background-color 0.3s;
+        }
+
+        .menu-cursor-triangle {
+            width: 0; height: 0; 
+            border-top: 6px solid transparent;
+            border-bottom: 6px solid transparent;
+            border-left: 8px solid #333;
+        }
+
+        .pixel-art {
+            image-rendering: pixelated;
+            shape-rendering: crispEdges; /* 关键：让SVG看起来像像素画 */
+        }
+
+        /* --- 动画 --- */
+        @keyframes shake {
+            0% { transform: translate(0, 0); }
+            20% { transform: translate(-6px, 0); }
+            40% { transform: translate(6px, 0); }
+            60% { transform: translate(-6px, 0); }
+            80% { transform: translate(6px, 0); }
+            100% { transform: translate(0, 0); }
+        }
+        
+        @keyframes tackle-anim {
+            0% { transform: translate(0, 0); }
+            25% { transform: translate(-10px, 10px); }
+            50% { transform: translate(30px, -30px) scale(1.2); }
+            100% { transform: translate(0, 0); }
+        }
+
+        @keyframes flash-white {
+            0% { background-color: rgba(255,255,255,0); }
+            50% { background-color: rgba(255,255,255,0.9); }
+            100% { background-color: rgba(255,255,255,0); }
+        }
+
+        @keyframes bounce-up {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
+        @keyframes flash-red { 0%, 100% { filter: none; } 50% { filter: sepia(1) hue-rotate(-50deg) saturate(5); } }
+        
+        /* 网的投掷动画：旋转+抛物线 */
+        @keyframes throw-net {
+            0% { transform: translate(0, 0) rotate(0deg) scale(0.5); opacity: 1; }
+            25% { transform: translate(60px, -80px) rotate(90deg) scale(0.8); }
+            50% { transform: translate(120px, -40px) rotate(180deg) scale(1.0); }
+            75% { transform: translate(140px, 0px) rotate(270deg) scale(1.0); }
+            100% { transform: translate(150px, 20px) rotate(360deg) scale(0); opacity: 0; }
+        }
+
+        @keyframes ball-rock {
+            0% { transform: rotate(0deg); }
+            25% { transform: rotate(-25deg); }
+            50% { transform: rotate(0deg); }
+            75% { transform: rotate(25deg); }
+            100% { transform: rotate(0deg); }
+        }
+
+        /* Usagi Idle Animation */
+        @keyframes usagi-idle {
+            0%, 100% { transform: scaleY(1); }
+            50% { transform: scaleY(1.05) scaleX(0.95); }
+        }
+
+        .animate-shake { animation: shake 0.4s ease-in-out; }
+        .animate-tackle { animation: tackle-anim 0.4s ease-in-out; }
+        .animate-bounce { animation: bounce-up 0.4s ease-in-out; }
+        .animate-blink { animation: blink 0.2s infinite; }
+        .animate-damage { animation: flash-red 0.2s; }
+        .animate-flash { animation: flash-white 0.2s forwards; position: absolute; inset: 0; z-index: 100; pointer-events: none;}
+        .ball-shaking { animation: ball-rock 0.8s 3; }
+        .usagi-idle { animation: usagi-idle 0.6s infinite ease-in-out; transform-origin: bottom center; }
+
+    </style>
+</head>
+<body class="h-screen w-screen flex items-center justify-center bg-zinc-900">
+
+    <!-- GBA Container -->
+    <div class="gba-body w-[360px] sm:w-[680px] flex flex-col items-center p-4 sm:p-8 relative select-none">
+        
+        <div class="absolute -top-3 left-12 w-28 h-5 bg-gray-400 rounded-t-lg border-b border-gray-500 z-[-1]"></div>
+        <div class="absolute -top-3 right-12 w-28 h-5 bg-gray-400 rounded-t-lg border-b border-gray-500 z-[-1]"></div>
+
+        <div class="screen-lens z-10 mb-6">
+            <div class="w-full flex justify-between items-center px-6 mb-1">
+                <div class="power-light w-2 h-2 sm:w-3 sm:h-3" id="power-led"></div>
+                <div class="logo text-[10px] sm:text-xs text-gray-400">GAME BOY <span class="text-gray-300 font-bold italic">ADVANCE</span></div>
+                <div class="w-2"></div>
+            </div>
+
+            <!-- 游戏屏幕 -->
+            <div class="lcd-screen relative" id="game-container">
+                <div id="flash-overlay"></div>
+
+                <!-- Start Screen -->
+                <div id="start-screen" class="absolute inset-0 flex flex-col items-center justify-center bg-[#483B94] text-white z-40">
+                    <h1 class="text-4xl sm:text-6xl mb-2 font-bold text-yellow-300 drop-shadow-md tracking-widest">CHIIKAWA</h1>
+                    <h2 class="text-xl sm:text-2xl text-yellow-100 mb-8">POCKET VERSION</h2>
+                    <p class="text-base animate-pulse bg-black/30 px-4 py-1 rounded border border-white/20">PRESS START</p>
+                </div>
+
+                <!-- Battle Scene -->
+                <div id="battle-scene" class="absolute inset-0 hidden flex flex-col bg-[#F8F8D8]">
+                    
+                    <!-- Background Elements -->
+                    <div class="flex-1 relative overflow-hidden">
+                        <div class="absolute right-[-10px] top-[60px] w-[200px] h-[60px] bg-[#e0e0c0] rounded-[50%] border-4 border-[#c0c0a0] transform rotate-[-5deg] z-0"></div>
+                        
+                        <!-- Enemy Info -->
+                        <div class="absolute top-4 left-4 bg-white/90 border-b-4 border-r-4 border-gray-400/50 border-t-2 border-l-2 border-gray-600 px-3 py-2 rounded-lg shadow-lg z-10 min-w-[140px]">
+                            <div class="flex justify-between text-base font-bold text-gray-800 leading-none mb-1">
+                                <span>乌萨奇</span>
+                                <span>Lv.5</span>
+                            </div>
+                            <div class="w-full hp-bar-bg mt-1 bg-gray-200">
+                                <div id="enemy-hp" class="hp-bar-fill" style="width: 100%;"></div>
+                            </div>
+                        </div>
+
+                        <!-- ENEMY: Usagi (High Precision Pixel Art - Front View) -->
+                        <div id="enemy-sprite" class="absolute right-8 top-6 w-36 h-36 z-10 usagi-idle">
+                            <!-- 64x64 Grid Logic -->
+                            <svg viewBox="0 0 64 64" class="pixel-art w-full h-full drop-shadow-xl">
+                                <!-- Definition of colors -->
+                                <defs>
+                                    <style>
+                                        .u-outline { fill: #4A3830; }
+                                        .u-body { fill: #FFF5C0; }
+                                        .u-shadow { fill: #E6D890; }
+                                        .u-pink { fill: #FFB8B8; }
+                                        .u-white { fill: #FFFFFF; }
+                                    </style>
+                                </defs>
+                                
+                                <!-- Right Ear (Viewer's Right) -->
+                                <path class="u-outline" d="M42 4 h10 v30 h-10 Z" />
+                                <path class="u-body" d="M44 6 h6 v26 h-6 Z" />
+                                <rect x="46" y="10" width="2" height="14" class="u-pink" opacity="0.6"/>
+
+                                <!-- Left Ear (Viewer's Left) -->
+                                <path class="u-outline" d="M14 4 h10 v30 h-10 Z" />
+                                <path class="u-body" d="M16 6 h6 v26 h-6 Z" />
+                                <rect x="18" y="10" width="2" height="14" class="u-pink" opacity="0.6"/>
+
+                                <!-- Body Shape -->
+                                <path class="u-outline" d="M12 28 h42 v32 h-42 Z" />
+                                <!-- Rounding corners manually for pixel look -->
+                                <rect x="10" y="30" width="2" height="28" class="u-outline" />
+                                <rect x="54" y="30" width="2" height="28" class="u-outline" />
+                                
+                                <!-- Body Fill -->
+                                <rect x="14" y="30" width="38" height="28" class="u-body" />
+                                <rect x="12" y="32" width="2" height="24" class="u-body" />
+                                <rect x="52" y="32" width="2" height="24" class="u-body" />
+
+                                <!-- Face Details -->
+                                <!-- Eyes -->
+                                <rect x="22" y="40" width="4" height="4" class="u-outline" />
+                                <rect x="23" y="40" width="1" height="1" class="u-white" />
+                                
+                                <rect x="40" y="40" width="4" height="4" class="u-outline" />
+                                <rect x="41" y="40" width="1" height="1" class="u-white" />
+
+                                <!-- Cheeks -->
+                                <rect x="16" y="44" width="4" height="2" class="u-pink" opacity="0.7"/>
+                                <rect x="46" y="44" width="4" height="2" class="u-pink" opacity="0.7"/>
+
+                                <!-- Crazy Mouth (Wavy) -->
+                                <path class="u-outline" d="M29 48 h2 v2 h2 v-2 h2 v2 h-6 Z" />
+
+                                <!-- Arms (Flailing) -->
+                                <path class="u-outline" d="M6 40 h6 v4 h-6 Z" />
+                                <path class="u-body" d="M8 40 h4 v2 h-4 Z" />
+                                
+                                <path class="u-outline" d="M54 36 h6 v4 h-6 Z" />
+                                <path class="u-body" d="M54 38 h4 v2 h-4 Z" />
+
+                                <!-- Tail -->
+                                <rect x="54" y="52" width="4" height="4" class="u-body" />
+                                <rect x="56" y="54" width="2" height="2" class="u-outline" opacity="0.2"/>
+
+                                <!-- Shadowing for depth -->
+                                <path class="u-shadow" d="M14 56 h38 v2 h-38 Z" opacity="0.5" />
+                            </svg>
+                        </div>
+
+                        <!-- Catching Net Sprite (New Animation Asset) -->
+                        <div id="catch-net" class="absolute left-10 bottom-10 w-10 h-10 hidden z-30">
+                            <svg viewBox="0 0 32 32" class="pixel-art w-full h-full">
+                                <!-- Net Handle -->
+                                <rect x="4" y="24" width="12" height="4" fill="#8B4513" transform="rotate(-45 10 26)"/>
+                                <!-- Net Ring -->
+                                <ellipse cx="20" cy="12" rx="8" ry="8" fill="rgba(255,255,255,0.3)" stroke="#C0C0C0" stroke-width="2"/>
+                                <!-- Mesh -->
+                                <path d="M16 8 L24 16 M24 8 L16 16 M14 12 L26 12 M20 6 L20 18" stroke="#C0C0C0" stroke-width="1"/>
+                            </svg>
+                        </div>
+                        
+                        <!-- Pokeball (Ball form for catch phase) -->
+                        <div id="pokeball" class="absolute right-20 top-28 w-8 h-8 hidden z-20">
+                             <svg viewBox="0 0 24 24" class="pixel-art w-full h-full">
+                                <circle cx="12" cy="12" r="10" fill="white" stroke="#333" stroke-width="2"/>
+                                <path d="M2 12 A10 10 0 0 1 22 12" fill="#FF4757"/>
+                                <rect x="2" y="11" width="20" height="2" fill="#333"/>
+                                <circle cx="12" cy="12" r="3" fill="white" stroke="#333" stroke-width="2"/>
+                            </svg>
+                        </div>
+                    </div>
+
+                    <!-- Player Area -->
+                    <div class="flex-1 relative">
+                        <div class="absolute left-[-20px] bottom-[-20px] w-[240px] h-[70px] bg-[#c0d0c0] rounded-[50%] border-4 border-[#a0b0a0] transform rotate-[10deg] z-0"></div>
+
+                        <!-- PLAYER: Hachiware (High Precision Pixel Art - Back/Side View) -->
+                        <!-- Note: transform scaleX(-1) flips it horizontally. 
+                             We draw Hachiware facing LEFT in SVG so when flipped he faces RIGHT (Battle view). -->
+                        <div id="player-sprite" class="absolute left-8 bottom-0 w-44 h-44 z-10" style="transform: scaleX(-1);">
+                            <svg viewBox="0 0 64 64" class="pixel-art w-full h-full drop-shadow-xl">
+                                <defs>
+                                    <style>
+                                        .h-outline { fill: #2D3436; }
+                                        .h-white { fill: #FFFFFF; }
+                                        .h-blue { fill: #74B9FF; }
+                                        .h-shadow { fill: #DFE6E9; }
+                                        .h-weapon-stick { fill: #FFA5A5; } /* Sasumata pink stick */
+                                        .h-weapon-head { fill: #74B9FF; } /* Sasumata blue head */
+                                    </style>
+                                </defs>
+
+                                <!-- Weapon: Sasumata (Behind body layer) -->
+                                <!-- Stick -->
+                                <rect x="40" y="15" width="4" height="40" class="h-weapon-stick" transform="rotate(15 42 35)" stroke="#2D3436" stroke-width="1" />
+                                <!-- U shape head -->
+                                <path d="M34 10 h14 v4 h-4 v6 h-6 v-6 h-4 Z" class="h-weapon-head" transform="rotate(15 42 35)" stroke="#2D3436" stroke-width="1"/>
+
+                                <!-- Body Outline (Back View) -->
+                                <path class="h-outline" d="M16 24 h32 v38 h-32 Z" />
+                                <rect x="14" y="28" width="2" height="30" class="h-outline" />
+                                <rect x="48" y="28" width="2" height="30" class="h-outline" />
+
+                                <!-- Body Fill -->
+                                <rect x="18" y="26" width="28" height="34" class="h-white" />
+                                <rect x="16" y="30" width="2" height="26" class="h-white" />
+                                <rect x="46" y="30" width="2" height="26" class="h-white" />
+
+                                <!-- Blue Hair/Head Pattern (Back View) -->
+                                <!-- Left Ear (Blue tip) -->
+                                <path class="h-outline" d="M16 8 h10 v16 h-10 Z" />
+                                <path class="h-blue" d="M18 10 h6 v12 h-6 Z" />
+                                
+                                <!-- Right Ear (Blue tip) -->
+                                <path class="h-outline" d="M38 8 h10 v16 h-10 Z" />
+                                <path class="h-blue" d="M40 10 h6 v12 h-6 Z" />
+
+                                <!-- Head Connection (Blue V shape) -->
+                                <path class="h-blue" d="M24 20 h16 v6 h-16 Z" />
+                                
+                                <!-- Tail (Blue Tip) -->
+                                <path class="h-outline" d="M10 50 h8 v4 h-8 Z" />
+                                <rect x="12" y="51" width="4" height="2" class="h-blue" />
+
+                                <!-- Hand (Holding Weapon) -->
+                                <rect x="44" y="40" width="6" height="6" class="h-white" rx="1" stroke="#2D3436" stroke-width="1" />
+
+                                <!-- Cheek (Side view hint) -->
+                                <rect x="46" y="32" width="2" height="2" fill="#FFB8B8" opacity="0.5"/>
+
+                                <!-- Shadow -->
+                                <rect x="18" y="58" width="28" height="2" class="h-shadow" />
+                            </svg>
+                        </div>
+                          
+                        <div class="absolute right-4 bottom-12 bg-white/90 border-b-4 border-r-4 border-gray-400/50 border-t-2 border-l-2 border-gray-600 px-4 py-2 rounded-lg shadow-lg w-44 z-20">
+                             <div class="flex justify-between text-base font-bold text-gray-800 leading-none mb-1">
+                                 <span>小八</span>
+                                 <span>Lv.5</span>
+                             </div>
+                             <div class="w-full hp-bar-bg mt-1 bg-gray-200">
+                                 <div id="player-hp" class="hp-bar-fill" style="width: 100%;"></div>
+                             </div>
+                             <div class="text-sm text-right mt-1 font-mono tracking-wider">20/20</div>
+                          </div>
+                    </div>
+
+                    <!-- Text Box Area -->
+                    <div class="h-36 bg-[#303841] p-1 relative z-30">
+                        <div class="h-full bg-white rounded border-4 border-[#606060] p-4 relative flex flex-col text-xl leading-tight shadow-inner">
+                            
+                            <div id="dialogue-text" class="flex-1 text-gray-800 p-1"></div>
+                            <div id="text-arrow" class="absolute right-4 bottom-4 text-red-500 animate-bounce hidden">▼</div>
+
+                            <!-- Main Menu -->
+                            <div id="action-menu" class="hidden absolute right-0 bottom-0 w-[55%] h-full bg-white border-l-4 border-t-4 border-[#606060] p-2">
+                                <div class="grid grid-cols-2 h-full gap-1">
+                                    <div class="flex items-center pl-6 relative" id="menu-0">战斗</div>
+                                    <div class="flex items-center pl-6 relative" id="menu-1">背包</div>
+                                    <div class="flex items-center pl-6 relative" id="menu-2">同伴</div>
+                                    <div class="flex items-center pl-6 relative" id="menu-3">逃跑</div>
+                                </div>
+                                <div id="menu-cursor" class="absolute menu-cursor-triangle transition-all duration-75"></div>
+                            </div>
+
+                            <!-- Moves Menu -->
+                            <div id="move-menu" class="hidden absolute inset-0 bg-white z-20 grid grid-cols-2 gap-0 p-2 text-lg border-2 border-gray-400">
+                                <div class="flex items-center pl-6 border-r border-b border-gray-200 uppercase">讨伐</div>
+                                <div class="flex items-center pl-6 border-b border-gray-200 uppercase">拍照</div>
+                                <div class="flex items-center pl-6 border-r border-gray-200 uppercase">煮饭</div>
+                                <div class="flex items-center pl-6 text-gray-500">返回</div>
+                                <div id="move-cursor" class="absolute menu-cursor-triangle transition-all duration-75"></div>
+                                <div class="absolute right-2 bottom-2 text-sm text-gray-400 font-mono">PP 10/10</div>
+                            </div>
+                            
+                            <!-- Bag Menu (Updated with Count) -->
+                            <div id="bag-menu" class="hidden absolute inset-0 bg-white z-20 p-4 text-lg border-2 border-gray-400 flex flex-col gap-2">
+                                <div class="pl-6 py-1 flex justify-between pr-4">
+                                    <span>讨伐网</span>
+                                    <span id="net-count" class="font-mono">x3</span>
+                                </div>
+                                <div class="pl-6 py-1 text-gray-400">能量饮料 (空)</div>
+                                <div class="absolute bottom-3 right-3 text-sm text-gray-500">B键 返回</div>
+                                <div id="bag-cursor" class="absolute menu-cursor-triangle transition-all duration-75"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Dex Screen -->
+                <div id="dex-screen" class="absolute inset-0 hidden z-50 flex flex-col p-6 text-[#303841] bg-[#C0D8FF]">
+                    <div class="border-b-4 border-[#303841] pb-2 mb-2 flex justify-between items-end">
+                        <h2 class="text-2xl font-bold tracking-widest">图鉴注册完成</h2>
+                        <span class="text-base font-mono">No.002</span>
+                    </div>
+                    
+                    <div class="flex gap-4 mt-4">
+                        <div class="w-32 h-32 bg-white border-4 border-[#303841] rounded flex items-center justify-center relative overflow-hidden">
+                            <div class="absolute inset-0 bg-gray-100 opacity-20" style="background-image: radial-gradient(#888 20%, transparent 20%); background-size: 8px 8px;"></div>
+                            <svg viewBox="0 0 100 100" class="pixel-art w-24 h-24">
+                                <!-- Reused Usagi Sprite -->
+                                <path d="M25 35 C20 35 15 85 25 85 L75 85 C85 85 80 35 75 35 Z" fill="#FFEAA7" stroke="#4A3830" stroke-width="2"/>
+                                <path d="M32 35 L32 5 L42 5 L42 35 Z" fill="#FFEAA7" stroke="#4A3830" stroke-width="2"/>
+                                <rect x="36" y="10" width="2" height="15" fill="#FFB8B8"/>
+                                <path d="M58 35 L58 5 L68 5 L68 35 Z" fill="#FFEAA7" stroke="#4A3830" stroke-width="2"/>
+                                <rect x="62" y="10" width="2" height="15" fill="#FFB8B8"/>
+                                <circle cx="38" cy="55" r="3" fill="#333"/>
+                                <circle cx="39" cy="54" r="1" fill="white"/>
+                                <circle cx="62" cy="55" r="3" fill="#333"/>
+                                <circle cx="63" cy="54" r="1" fill="white"/>
+                                <path d="M45 62 Q50 65 55 62" fill="none" stroke="#333" stroke-width="2" stroke-linecap="round"/>
+                                <ellipse cx="32" cy="60" rx="4" ry="2.5" fill="#FFB8B8" opacity="0.6"/>
+                                <ellipse cx="68" cy="60" rx="4" ry="2.5" fill="#FFB8B8" opacity="0.6"/>
+                            </svg>
+                        </div>
+                        
+                        <div class="flex-1 flex flex-col justify-center gap-1 text-lg font-bold leading-tight">
+                            <div>名称: 乌萨奇</div>
+                            <div>分类: 疯狂宝可梦</div>
+                            <div>身高: 0.4m</div>
+                            <div>体重: 3.0kg</div>
+                        </div>
+                    </div>
+
+                    <div class="mt-4 bg-white border-4 border-[#303841] p-3 rounded flex-1 shadow-inner">
+                        <p class="text-lg leading-6">
+                            经常发出"哈？"或者"呜拉"的奇怪叫声。喜欢吃东西，动作非常敏捷，性格自由奔放。
+                        </p>
+                    </div>
+                    <div class="text-center mt-2 animate-pulse text-sm font-bold">按 A 键 重新开始</div>
+                </div>
+
+            </div>
+            
+            <div class="w-full text-center mt-3">
+                <span class="text-xs text-gray-500 italic font-serif opacity-50">Nintendo</span>
+            </div>
+        </div>
+
+        <!-- Physical Controls -->
+        <div class="w-full h-40 flex justify-between items-start px-8 relative mt-2">
+            
+            <!-- D-Pad -->
+            <div class="d-pad w-32 h-32 relative top-2">
+                <div class="absolute top-0 left-10 w-10 h-10 rounded-t-md shadow-md cursor-pointer border border-black/20" id="btn-up"></div>
+                <div class="absolute bottom-0 left-10 w-10 h-10 rounded-b-md shadow-md cursor-pointer border border-black/20" id="btn-down"></div>
+                <div class="absolute top-10 left-0 w-10 h-10 rounded-l-md shadow-md cursor-pointer border border-black/20" id="btn-left"></div>
+                <div class="absolute top-10 right-0 w-10 h-10 rounded-r-md shadow-md cursor-pointer border border-black/20" id="btn-right"></div>
+                <div class="absolute top-10 left-10 w-10 h-10 bg-[#333]"></div>
+                <div class="absolute top-[45px] left-[45px] w-2 h-2 bg-[#222] rounded-full opacity-50"></div>
+            </div>
+
+            <!-- Select/Start -->
+            <div class="absolute bottom-6 left-1/2 transform -translate-x-1/2 flex gap-4">
+                <div class="flex flex-col items-center">
+                    <button id="btn-select" class="select-start w-14 h-5 rounded-full cursor-pointer mb-1 border border-black/20"></button>
+                    <span class="text-[10px] font-bold text-indigo-200 uppercase tracking-wider opacity-70">Select</span>
+                </div>
+                <div class="flex flex-col items-center">
+                    <button id="btn-start" class="select-start w-14 h-5 rounded-full cursor-pointer mb-1 border border-black/20"></button>
+                    <span class="text-[10px] font-bold text-indigo-200 uppercase tracking-wider opacity-70">Start</span>
+                </div>
+            </div>
+
+            <!-- A/B Buttons -->
+            <div class="w-40 h-32 relative">
+                <div class="absolute top-4 right-2 flex flex-col items-center group">
+                    <button id="btn-a" class="action-btn w-14 h-14 rounded-full bg-gray-200 text-gray-500 font-bold text-2xl flex items-center justify-center cursor-pointer z-10 border border-black/10">A</button>
+                    <span class="text-xs font-bold text-indigo-200 mt-1 opacity-70 group-active:opacity-100">A</span>
+                </div>
+                <div class="absolute top-14 left-4 flex flex-col items-center group">
+                    <button id="btn-b" class="action-btn w-14 h-14 rounded-full bg-gray-200 text-gray-500 font-bold text-2xl flex items-center justify-center cursor-pointer z-10 border border-black/10">B</button>
+                    <span class="text-xs font-bold text-indigo-200 mt-1 opacity-70 group-active:opacity-100">B</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="absolute bottom-2 text-gray-500/50 text-xs text-center font-mono">
+        [Z]=A  [X]=B  [Arrows]=Move  [Enter]=Start
+    </div>
+
+    <script>
+        /* --- AUDIO SYSTEM --- */
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        let audioCtx;
+        let masterGain;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new AudioContext();
+                masterGain = audioCtx.createGain();
+                masterGain.gain.value = 0.25;
+                masterGain.connect(audioCtx.destination);
+                document.getElementById('power-led').classList.add('on');
+            }
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+        }
+
+        function playTone(freq, type, duration, time = 0, vol = 0.2) {
+            if(!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, audioCtx.currentTime + time);
+            gain.gain.setValueAtTime(vol, audioCtx.currentTime + time);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + time + duration);
+            osc.connect(gain);
+            gain.connect(masterGain);
+            osc.start(audioCtx.currentTime + time);
+            osc.stop(audioCtx.currentTime + time + duration);
+        }
+
+        function playNoise(duration) {
+            if(!audioCtx) return;
+            const bufSize = audioCtx.sampleRate * duration;
+            const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+            const data = buf.getChannelData(0);
+            for(let i=0; i<bufSize; i++) data[i] = Math.random()*2-1;
+            
+            const node = audioCtx.createBufferSource();
+            node.buffer = buf;
+            const gain = audioCtx.createGain();
+            gain.gain.value = 0.2;
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+            node.connect(gain);
+            gain.connect(masterGain);
+            node.start();
+        }
+
+        const sfx = {
+            select: () => playTone(1200, 'square', 0.05),
+            cursor: () => playTone(400, 'square', 0.05),
+            cancel: () => playTone(300, 'sawtooth', 0.15),
+            hit: () => { playNoise(0.1); playTone(100, 'sawtooth', 0.1); },
+            photo: () => { playNoise(0.05); playTone(2000, 'sine', 0.05, 0.05); },
+            heal: () => { playTone(400, 'sine', 0.1); playTone(600, 'sine', 0.1, 0.1); playTone(800, 'sine', 0.2, 0.2); },
+            run: () => { playTone(150, 'sawtooth', 0.1); playTone(100, 'sawtooth', 0.1, 0.1); },
+            cry: () => {
+                playTone(600, 'triangle', 0.1);
+                playTone(1200, 'sine', 0.2, 0.1);
+                playTone(500, 'square', 0.4, 0.25);
+            },
+            catchSuccess: () => {
+                [523, 659, 783, 1046, 0, 783, 1046].forEach((f, i) => {
+                    if(f>0) playTone(f, 'square', 0.12, i*0.12);
+                });
+            },
+            dex: () => {
+                 playTone(1200, 'sine', 0.1, 0);
+                 playTone(1200, 'sine', 0.1, 0.1);
+                 playTone(1800, 'square', 0.3, 0.2);
+            }
+        };
+
+        /* --- GAME LOGIC --- */
+        const State = { START: 0, TEXT: 1, MAIN: 2, MOVES: 3, BAG: 4, ANIM: 5, DEX: 6 };
+        let curState = State.START;
+        let menuCursor = 0; 
+        let subCursor = 0;
+        let pHP = 20, eHP = 20;
+        let throwCount = 0; 
+        let netCount = 3; // 物品数量
+        
+        const ui = {
+            start: document.getElementById('start-screen'),
+            battle: document.getElementById('battle-scene'),
+            dex: document.getElementById('dex-screen'),
+            text: document.getElementById('dialogue-text'),
+            actionMenu: document.getElementById('action-menu'),
+            moveMenu: document.getElementById('move-menu'),
+            bagMenu: document.getElementById('bag-menu'),
+            menuC: document.getElementById('menu-cursor'),
+            moveC: document.getElementById('move-cursor'),
+            bagC: document.getElementById('bag-cursor'),
+            eHpBar: document.getElementById('enemy-hp'),
+            pHpBar: document.getElementById('player-hp'),
+            pSprite: document.getElementById('player-sprite'),
+            eSprite: document.getElementById('enemy-sprite'),
+            net: document.getElementById('catch-net'),
+            ball: document.getElementById('pokeball'),
+            flash: document.getElementById('flash-overlay'),
+            netCount: document.getElementById('net-count')
+        };
+
+        function msg(text, cb) {
+            curState = State.TEXT;
+            ui.actionMenu.classList.add('hidden');
+            ui.moveMenu.classList.add('hidden');
+            ui.bagMenu.classList.add('hidden');
+            ui.text.innerHTML = "";
+            
+            let i = 0;
+            const timer = setInterval(() => {
+                ui.text.textContent += text[i];
+                i++;
+                if(i >= text.length) {
+                    clearInterval(timer);
+                    setTimeout(() => {
+                        if(cb) cb();
+                    }, 1000);
+                }
+            }, 30);
+        }
+
+        function updateHP() {
+            ui.pHpBar.style.width = (pHP/20)*100 + "%";
+            ui.pHpBar.style.backgroundColor = pHP < 5 ? '#ff4757' : '#4cd137';
+            ui.eHpBar.style.width = (eHP/20)*100 + "%";
+            ui.eHpBar.style.backgroundColor = eHP < 5 ? '#ff4757' : '#4cd137';
+        }
+
+        function initBattle() {
+            ui.start.classList.add('hidden');
+            ui.battle.classList.remove('hidden');
+            ui.battle.style.display = 'flex';
+            sfx.cry();
+            throwCount = 0;
+            netCount = 3;
+            ui.netCount.textContent = "x" + netCount;
+            pHP = 20; eHP = 20; updateHP();
+            ui.eSprite.classList.remove('hidden');
+            ui.eSprite.style.opacity = 1;
+            msg("野生的 乌萨奇 跳出来了!", () => {
+                msg("去吧! 小八!", () => {
+                    toMainMenu();
+                });
+            });
+        }
+
+        function toMainMenu() {
+            curState = State.MAIN;
+            ui.text.textContent = "小八 要做什么?";
+            ui.actionMenu.classList.remove('hidden');
+            menuCursor = 0;
+            renderCursor();
+        }
+
+        function renderCursor() {
+            if(curState === State.MAIN) {
+                const row1 = "25%"; const row2 = "75%";
+                const col1 = "8px"; const col2 = "50%";
+                ui.menuC.style.top = (menuCursor < 2) ? row1 : row2;
+                ui.menuC.style.left = (menuCursor % 2 === 0) ? col1 : col2;
+            }
+            else if(curState === State.MOVES) {
+                const top = (subCursor < 2) ? "32px" : "82px";
+                const left = (subCursor % 2 === 0) ? "10px" : "160px";
+                ui.moveC.style.top = top;
+                ui.moveC.style.left = left;
+            }
+            else if(curState === State.BAG) {
+                const top = (30 + subCursor * 36) + "px";
+                ui.bagC.style.top = top;
+                ui.bagC.style.left = "12px";
+            }
+        }
+
+        function enemyAction() {
+            curState = State.ANIM;
+            setTimeout(() => {
+                const skills = ["怪叫", "疯狂乱挥"];
+                const sk = skills[Math.floor(Math.random()*2)];
+                msg(`乌萨奇 使用了 ${sk}!`, () => {
+                    ui.eSprite.classList.add('animate-tackle');
+                    sfx.hit();
+                    setTimeout(() => {
+                        ui.eSprite.classList.remove('animate-tackle');
+                        ui.pSprite.classList.add('animate-damage');
+                        pHP = Math.max(0, pHP - 3);
+                        updateHP();
+                        setTimeout(() => {
+                            ui.pSprite.classList.remove('animate-damage');
+                            if(pHP <= 0) {
+                                msg("小八 倒下了...", () => location.reload());
+                            } else {
+                                toMainMenu();
+                            }
+                        }, 500);
+                    }, 500);
+                });
+            }, 500);
+        }
+
+        function useMove() {
+            if(subCursor === 3) { // Return
+                ui.moveMenu.classList.add('hidden');
+                toMainMenu();
+                return;
+            }
+            
+            curState = State.ANIM;
+            ui.moveMenu.classList.add('hidden');
+            const moves = ["讨伐", "拍照", "煮饭"];
+            const mName = moves[subCursor];
+
+            msg(`小八 使用了 ${mName}!`, () => {
+                if(mName === "讨伐") {
+                    ui.pSprite.classList.add('animate-tackle');
+                    setTimeout(() => sfx.hit(), 200);
+                } 
+                else if(mName === "拍照") {
+                    ui.flash.classList.add('animate-flash');
+                    sfx.photo();
+                }
+                else if(mName === "煮饭") {
+                    ui.pSprite.classList.add('animate-bounce');
+                    sfx.heal();
+                }
+
+                setTimeout(() => {
+                    ui.pSprite.classList.remove('animate-tackle');
+                    ui.pSprite.classList.remove('animate-bounce');
+                    ui.flash.classList.remove('animate-flash');
+                    
+                    if(mName === "煮饭") {
+                        pHP = Math.min(20, pHP + 5);
+                        updateHP();
+                        msg("小八 回复了体力!", enemyAction);
+                    } else {
+                        ui.eSprite.classList.add('animate-blink');
+                        if(mName === "讨伐") ui.eSprite.classList.add('animate-damage');
+                        
+                        let dmg = (mName === "讨伐") ? 5 : 2;
+                        eHP = Math.max(0, eHP - dmg);
+                        updateHP();
+                        
+                        setTimeout(() => {
+                            ui.eSprite.classList.remove('animate-blink');
+                            ui.eSprite.classList.remove('animate-damage');
+                            
+                            if(eHP <= 0) {
+                                ui.eSprite.classList.add('hidden');
+                                msg("乌萨奇 晕倒了!", () => {
+                                    sfx.catchSuccess();
+                                    msg("赢了! 获得 50 经验值!", () => setTimeout(() => location.reload(), 2000));
+                                });
+                            } else {
+                                enemyAction();
+                            }
+                        }, 500);
+                    }
+                }, 500);
+            });
+        }
+
+        function tryCatch() {
+            if(subCursor === 1) { // Empty item
+                msg("这里面是空的!");
+                setTimeout(() => {
+                    ui.bagMenu.classList.add('hidden');
+                    toMainMenu();
+                }, 1000);
+                return;
+            }
+            
+            if(netCount <= 0) {
+                msg("没有讨伐网了!");
+                setTimeout(() => {
+                    ui.bagMenu.classList.add('hidden');
+                    toMainMenu();
+                }, 1000);
+                return;
+            }
+
+            curState = State.ANIM;
+            ui.bagMenu.classList.add('hidden');
+            
+            netCount--;
+            ui.netCount.textContent = "x" + netCount;
+            throwCount++;
+            
+            msg(`小八 扔出了 讨伐网! (剩余:${netCount})`, () => {
+                // Throw Animation (Net)
+                ui.net.classList.remove('hidden');
+                ui.net.style.animation = "throw-net 1s forwards";
+                sfx.cursor(); 
+
+                setTimeout(() => {
+                    ui.eSprite.style.opacity = 0; // Enemy sucked in
+                    ui.net.classList.add('hidden'); // Hide flying net
+                    
+                    // Show Ball/Net on ground for shaking
+                    ui.ball.classList.remove('hidden');
+                    ui.ball.style.animation = "none";
+                    ui.ball.style.transform = "translate(150px, 20px)";
+                    
+                    setTimeout(() => {
+                        ui.ball.classList.add('ball-shaking');
+                        sfx.hit();
+                        
+                        setTimeout(() => {
+                            ui.ball.classList.remove('ball-shaking');
+                            
+                            let baseRate = (20 - eHP) * 5;
+                            if(throwCount < 2) baseRate = 10; 
+                            if(throwCount >= 2) baseRate += 40; 
+                            
+                            if(Math.random() * 100 < baseRate) {
+                                ui.ball.style.filter = "brightness(0.5)";
+                                sfx.catchSuccess();
+                                msg("太好了! 捉到 乌萨奇 了!", () => {
+                                    setTimeout(showPokedex, 1500);
+                                });
+                            } else {
+                                ui.ball.classList.add('hidden');
+                                ui.eSprite.style.opacity = 1;
+                                msg("糟糕! 挣脱了!", enemyAction);
+                            }
+                        }, 2400);
+                    }, 500);
+                }, 900);
+            });
+        }
+
+        function showPokedex() {
+            ui.battle.classList.add('hidden');
+            ui.dex.classList.remove('hidden');
+            ui.dex.style.display = 'flex';
+            sfx.dex();
+            curState = State.DEX;
+        }
+
+        /* --- INPUT HANDLING --- */
+        function input(key) {
+            initAudio();
+            
+            if(curState === State.START) {
+                if(key === 'A' || key === 'Start') initBattle();
+                return;
+            }
+            if(curState === State.DEX) {
+                if(key === 'A' || key === 'Start') location.reload();
+                return;
+            }
+
+            if(curState === State.MAIN) {
+                if(key === 'Right') { if(menuCursor % 2 === 0) menuCursor++; }
+                if(key === 'Left') { if(menuCursor % 2 !== 0) menuCursor--; }
+                if(key === 'Down') { if(menuCursor < 2) menuCursor += 2; }
+                if(key === 'Up') { if(menuCursor >= 2) menuCursor -= 2; }
+                
+                if(key === 'A') {
+                    sfx.select();
+                    if(menuCursor === 0) { 
+                        curState = State.MOVES; subCursor = 0; 
+                        ui.moveMenu.classList.remove('hidden'); 
+                    }
+                    else if(menuCursor === 1) { 
+                        curState = State.BAG; subCursor = 0; 
+                        ui.bagMenu.classList.remove('hidden'); 
+                    }
+                    else if(menuCursor === 2) { 
+                        msg("没有其他同伴...", toMainMenu); 
+                    }
+                    else if(menuCursor === 3) { 
+                        sfx.run();
+                        msg("在这个回合制游戏里逃不掉!", toMainMenu);
+                    }
+                }
+                renderCursor();
+            }
+            else if(curState === State.MOVES) {
+                if(key === 'Right') { if(subCursor % 2 === 0) subCursor++; }
+                if(key === 'Left') { if(subCursor % 2 !== 0) subCursor--; }
+                if(key === 'Down') { if(subCursor < 2) subCursor += 2; }
+                if(key === 'Up') { if(subCursor >= 2) subCursor -= 2; }
+                
+                if(key === 'B') { sfx.cancel(); ui.moveMenu.classList.add('hidden'); toMainMenu(); }
+                if(key === 'A') useMove();
+                renderCursor();
+            }
+            else if(curState === State.BAG) {
+                if(key === 'Up') subCursor = 0;
+                if(key === 'Down') subCursor = 1;
+                if(key === 'B') { sfx.cancel(); ui.bagMenu.classList.add('hidden'); toMainMenu(); }
+                if(key === 'A') tryCatch();
+                renderCursor();
+            }
+        }
+
+        document.addEventListener('keydown', (e) => {
+            const k = e.key;
+            const map = {'ArrowUp':'Up', 'ArrowDown':'Down', 'ArrowLeft':'Left', 'ArrowRight':'Right', 'z':'A', 'x':'B', 'Enter':'Start'};
+            if(map[k]) {
+                input(map[k]);
+                const btnMap = {'ArrowUp':'btn-up', 'ArrowDown':'btn-down', 'ArrowLeft':'btn-left', 'ArrowRight':'btn-right', 'z':'btn-a', 'x':'btn-b', 'Enter':'btn-start'};
+                const b = document.getElementById(btnMap[k]);
+                if(b) { b.classList.add('active'); setTimeout(()=>b.classList.remove('active'), 100); }
+            }
+        });
+
+        ['btn-up','btn-down','btn-left','btn-right','btn-a','btn-b','btn-start','btn-select'].forEach(id => {
+            const el = document.getElementById(id);
+            if(!el) return;
+            const k = {
+                'btn-up':'Up', 'btn-down':'Down', 'btn-left':'Left', 'btn-right':'Right',
+                'btn-a':'A', 'btn-b':'B', 'btn-start':'Start', 'btn-select': 'Select'
+            }[id];
+            el.addEventListener('touchstart', (e) => { e.preventDefault(); el.classList.add('active'); input(k); });
+            el.addEventListener('touchend', (e) => { e.preventDefault(); el.classList.remove('active'); });
+            el.addEventListener('mousedown', () => { el.classList.add('active'); input(k); });
+            el.addEventListener('mouseup', () => { el.classList.remove('active'); });
+        });
+
+    </script>
+</body>
+</html>
